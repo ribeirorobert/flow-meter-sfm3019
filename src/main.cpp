@@ -3,27 +3,14 @@
 
 void setup() {
   Serial.begin(38400);
+  Wire.begin();
   delay(1000);
 
-  Wire.begin();
-
-  Serial.print("\n\n");
-
-  if (SFMInitialize() == SFM_OK)
-    Serial.println(F("SFM INIT OK"));
-  else 
-    Serial.println(F("SFM INIT FAIL"));
-
-
-  if (SFMStartContReadAir() == SFM_OK) 
-    Serial.println(F("CONT READ AIR OK"));
-  else
-    Serial.println(F("CONT READ AIR FAIL"));
+  SFMInit();
 }
 
 void loop() {
-  SFMReadSensor(&FlowMeter.rawFlow);
-  Serial.println(FlowMeter.rawFlow);
-
-  delay(10);
+  if (SFMReadSensor(&FlowMeter.rawFlow) == INITIALIZED) {
+    Serial.println(FlowMeter.rawFlow);
+  }
 }

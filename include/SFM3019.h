@@ -15,32 +15,39 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+#define DEBUG_SFM                1
+#define SFM_I2C_ADDRESS          0x2E
 
-#define DEBUG_SFM   1
+#define SFM_CONT_READ_AIR        0x3608
+#define SFM_CONT_READ_O2         0x3603
+#define SFM_CONT_READ_AIR_O2     0x3632
+#define SFM_CHANGE_O2_FRAC       0xE17D
+#define SFM_STOP_CONT_READ       0x3FF9
+#define SFM_SOFT_RESET           0x0006
+#define SFM_READ_SCALE_OFFSET    0x3661
 
-#define SFM_I2C_ADDRESS               0x2E
+#define SCALE_FACTOR_FLOW    170U
+#define FLOW_OFFSET          40960
+#define MAX_ALLOWED_ERRORS   10
 
-#define SFM_START_CONTINUOUS_READ     0x1000
-#define SFM_READ_SCALE_FACTOR_OFFSET  0x3661
-#define SFM_CONTINUOUS_READ_AIR       0x3608
-#define SFM_CONTINUOUS_READ_O2        0x3603
-#define SFM_CONTINUOUS_READ_AIR_O2    0x3632
-#define SFM_STOP_CONTINUOUS_READ      0x3FF9
-#define SFM_SOFTWARE_RESET            0x0006
-#define SFM_CHANGE_O2_FRAC            0xE17D
-
-#define SCALE_FACTOR_FLOW              170U
-#define FLOW_OFFSET                    40960
-
-#define SFM_MAX_FLOW                  0x00F0
-#define SFM_MIN_FLOW                  0x000A
-
+#define RESET_TIMER_MS       10
+#define START_TIMER_MS       40
+#define PACKET_TIMER_MS      1
+#define READ_PERIOD_MS       10
 
 enum SFM_STATUS {
-  SFM_OK       = 0,
-  SFM_ERROR    = 1,
-  CONNECTED    = 2,
-  DISCONNECTED = 3
+  RESET          = 0,
+  RESETING       = 1,
+  STOP           = 2,
+  STOPPING       = 3,
+  READ_SETTINGS  = 4,
+  START          = 5,
+  STARTING       = 6,
+  DISCARD_PACKET = 7,
+  NEW_PACKET     = 8,
+
+  INITIALIZED     = 9,
+  NOT_INITIALIZED = 10,
 };
 
 enum I2C_STATUS {
@@ -49,7 +56,8 @@ enum I2C_STATUS {
   I2C_NACK_ADDR    = 2,
   I2C_NACK_ERROR   = 3,
   I2C_UNKNOW_ERROR = 4,
-  I2C_PACK_ERROR   = 5
+  I2C_PACK_ERROR   = 5,
+  I2C_CRC_ERROR    = 6
 };
 
 typedef union {
@@ -89,108 +97,146 @@ typedef struct {
   METER_SETTINGS settings;
   FLOW_DATA data;
 
-  uint8_t status = DISCONNECTED;
-  float rawFlow = 0;
+  float rawFlow;
+  uint8_t state;
+  
+  uint8_t errorCounter;
+  uint32_t readPeriod;
+  uint32_t timer;
 } FLOW_METER;
 
 
 /**
- * @brief
+ * @brief Inicializa o sensor
  * 
- * @param
- * @return 
+ * @param void
+ * @return nothing
 */
-uint8_t SFMInitialize(void);
+void SFMInit(void);
 
 
 /**
- * @brief
+ * @brief Inicia a leitura contínua do fluxo de ar
  * 
- * @param
- * @return 
+ * @param void
+ * @return status da comunicação com o sensor
 */
 uint8_t SFMStartContReadAir(void);
 
 
 /**
- * @brief
+ * @brief Inicia a leitura contínua do fluxo de oxigênio
  * 
- * @param
- * @return 
+ * @param void
+ * @return status da comunicação com o sensor
 */
-uint8_t SFMStopMeasurement(void);
+uint8_t SFMStartContReadO2(void);
 
 
 /**
- * @brief
+ * @brief Inicia a leitura contínua do fluxo de uma mistura de ar e oxigênio
  * 
- * @param
- * @return 
+ * @param fração de O2
+ * @return status da comunicação com o sensor
+*/
+uint8_t SFMStartContReadAirO2(uint8_t o2Frac);
+
+/**
+ * @brief Define a fração volumétrica de oxigênio
+ * 
+ * @param fração de O2
+ * @return status da comunicação com o sensor
+*/
+uint8_t SFMSetVolumeFrac(uint8_t o2Frac);
+
+/**
+ * @brief Encerra a leitura contínua de fluxo
+ * 
+ * @param void
+ * @return status da comunicação com o sensor
+*/
+uint8_t SFMStopContRead(void);
+
+
+/**
+ * @brief Executa uma reinicialização de software
+ * 
+ * @param void
+ * @return status da comunicação com o sensor
 */
 uint8_t SFMSoftwareReset(void);
 
 
 /**
- * @brief
+ * @brief Lê e configura as configurações do sensor
  * 
- * @param
- * @return 
+ * @param struct de configurações do sensor
+ * @return status da comunicação com o sensor
 */
 uint8_t SFMReadSettings(METER_SETTINGS *);
 
 
 /**
- * @brief
+ * @brief Lê o fluxo atual do sensor
  * 
- * @param
- * @return 
-*/
-uint8_t SFMSetGasMixture(uint8_t o2Frac);
-
-
-/**
- * @brief
- * 
- * @param
- * @return 
+ * @param fluxo ponteiro para armazenar o valor do fluxo lido
+ * @return status da comunicação com o sensor
 */
 uint8_t SFMReadSensor(float *flow);
 
 
 /**
- * @brief
+ * @brief Descarta um pacote de dados inválido
  * 
- * @param
- * @return 
+ * @param void
+ * @return status da comunicação com o sensor
 */
-uint8_t SFMGenCRC(uint8_t *data, uint8_t len);
+uint8_t SFMDiscardPacket(void);
 
 
 /**
  * @brief
  * 
  * @param
- * @return 
+ * @return status da comunicação com o sensor
+*/
+uint8_t SFMInitStateMachine(void);
+
+
+/**
+ * @brief Cálcula o valor de CRC
+ * 
+ * @param data,len dados e tamanho para calc. do crc
+ * @return crc cálculado
+*/
+uint8_t SFMCalcCRC(uint8_t *data, uint8_t len);
+
+
+/**
+ * @brief Envia dados para o dispositivo especificado através do barramento I2C
+ * 
+ * @param endereço, dados e tamanho
+ * @return status da comunicação I2C
 */
 uint8_t I2C_Write(uint8_t address, uint8_t *data, uint8_t size);
 
 
 /**
- * @brief
+ * @brief Lê dados do dispositivo especificado através do barramento I2C
  * 
- * @param
- * @return 
+ * @param endereço, dados e tamanho
+ * @return status da comunicação I2C
 */
 uint8_t I2C_Read(uint8_t address, uint8_t *data, uint8_t size);
 
 
 /**
- * @brief
+ * @brief Inverte a ordem dos bytes de um valor de 16 bits
  * 
- * @param
- * @return 
+ * @param val Valor de 16 bits a ser invertido
+ * @return valor com os bytes invertidos
 */
-uint16_t AdjustEndianness(uint16_t Val);
+uint16_t SwapBytes(uint16_t val);
 
 
 
