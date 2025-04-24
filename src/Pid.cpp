@@ -70,8 +70,8 @@ float PidControllerUpdate(PidController_t* pid, float reference, float feedback)
 
   /*integral term*/
   if (pid->ki != 0) {
-    //pid->iTerm = pid->iTerm + (pid->ki * pid->error * pid->sampleTime);
-    pid->iTerm = pid->iTerm + (pid->ki * ((pid->error + pid->prevError)/2) * pid->sampleTime) + (pid->ku * pid->satError * pid->sampleTime);
+    pid->iTerm = pid->iTerm + (pid->ki * pid->error * pid->sampleTime);
+    //pid->iTerm = pid->iTerm + (pid->ki * ((pid->error + pid->prevError)/2) * pid->sampleTime) + (pid->ku * pid->satError * pid->sampleTime);
     if (pid->iTerm > pid->maxIntegr) pid->iTerm = pid->maxIntegr;
     if (pid->iTerm < pid->minIntegr) pid->iTerm = pid->minIntegr;
   } else {

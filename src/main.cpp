@@ -7,16 +7,28 @@
 uint8_t blowerSpeed = 0;
 uint8_t pwmValue = 0;
 
-uint8_t flowRef = 0;
-float kp = 5, ki = 0.2;
+float ctrlRaw = 0;
+float flowRef = 0;
+float pTerm = 0, iTerm = 0, dTerm = 0;
+//float kp = 2.0, ki = 7.8, kd = 0.0;
+float kp = 3.8918, ki = 16.0769, kd = 0.2355;
+float prevError = 0;
+unsigned long timer1, timer2;
 
 float tidalVolume = 0;
 unsigned long previousMillis;
+uint32_t prevIterationTime;
+
+unsigned long prevMillis;
+uint8_t flag = 0;
+uint8_t enable = 0;
 
 void read_cmds(void);
 void read_flow_sensor(void);
-void blower_set_speed(void);
+void blower_set_speed(uint8_t);
 void debug(void);
+void flow_control(float, float);
+void update_flow_ref(void);
 
 PidController_t flowCtrl;
 
@@ -28,20 +40,28 @@ void setup() {
   SFMInit();
 
   pinMode(BLOWER_CONTROL_PIN, OUTPUT);
+  analogWrite(BLOWER_CONTROL_PIN, 0);
 
   PidControllerInit(&flowCtrl);
   PidControllerSetGains(&flowCtrl, kp, ki, 0.0, 0.0, 0.8, 0.001);
-  PidControllerSetLimits(&flowCtrl, 25, -25, 100, -100, 255, 0);
+  PidControllerSetLimits(&flowCtrl, 150, -150, 150, -150, 255, 0);
+  PidControllerSetFFD(&flowCtrl, 80);
 }
 
 void loop() {
-  read_cmds();
-  read_flow_sensor();
-  //blower_set_speed();
-  debug();
 
-  uint8_t pwm = PidControllerUpdate(&flowCtrl, flowRef, FlowMeter.rawFlow);
-  analogWrite(BLOWER_CONTROL_PIN, pwm);
+  if (millis() - timer2 >= 10) {
+    timer2 = millis();
+
+    read_cmds();
+    read_flow_sensor();
+    update_flow_ref();
+
+    ctrlRaw = PidControllerUpdate(&flowCtrl, flowRef, FlowMeter.rawFlow);
+    //flow_control(flowRef, FlowMeter.rawFlow);
+    blower_set_speed((uint8_t)ctrlRaw);
+    debug();
+  }  
 }
 
 void read_cmds(void) {
@@ -49,32 +69,52 @@ void read_cmds(void) {
   if (Serial.available() > 0) {
     char c = (char)Serial.read();
 
-    // if (c == '0') blowerSpeed = 0;
-    // if (c == '1') blowerSpeed += 10;
-    // if (c == '2') blowerSpeed -= 10;
+    if (c == '0') ctrlRaw = 0;
+    if (c == '1') ctrlRaw = 255;
 
-    if (c == '0') flowRef = 0;
-    if (c == '1') flowRef += 10;
-    if (c == '2') flowRef -= 10;
-
-    if (c == '3') {
-      kp += 1.0;
+    if (c == 'q') {
+      kp = 0.0;
       PidControllerSetKp(&flowCtrl, kp);
     }
 
-    if (c == '4') {
-      kp -= 1.0;
+    if (c == 'w') {
+      kp += 0.1;
       PidControllerSetKp(&flowCtrl, kp);
     }
 
-    if (c == '5') {
-      ki += 0.2;
+    if (c == 'e') {
+      kp -= 0.1;
+      PidControllerSetKp(&flowCtrl, kp);
+    }
+
+    if (c == 'a') {
+      ki = 0.0;
       PidControllerSetKi(&flowCtrl, ki);
     }
 
-    if (c == '6') {
-      ki -= 0.2;
+    if (c == 's') {
+      ki += 0.05;
       PidControllerSetKi(&flowCtrl, ki);
+    }
+
+    if (c == 'd') {
+      ki -= 0.05;
+      PidControllerSetKi(&flowCtrl, ki);
+    }
+
+    if (c == 'z') {
+      kd = 0.0;
+      PidControllerSetKd(&flowCtrl, kd);
+    }
+
+    if (c == 'x') {
+      kd += 0.05;
+      PidControllerSetKd(&flowCtrl, kd);
+    }
+
+    if (c == 'c') {
+      kd -= 0.05;
+      PidControllerSetKd(&flowCtrl, kd);
     }
   }
 }
@@ -90,30 +130,72 @@ void read_flow_sensor(void) {
     } else {
       tidalVolume = 0;
     }
-
-    // Serial.print(FlowMeter.rawFlow);
-    // Serial.print('\t');
-    // Serial.print(tidalVolume);
-    // Serial.print('\n');
   }
 }
 
-void blower_set_speed(void) {
-  if (blowerSpeed > 100) blowerSpeed = 100;
-  if (blowerSpeed < 0) blowerSpeed = 0;
-
-  pwmValue = ((float)blowerSpeed * 255.0F) / 100.0F;
-
+void blower_set_speed(uint8_t pwmValue) {
+  pwmValue = constrain(pwmValue, 0, 255);
   analogWrite(BLOWER_CONTROL_PIN, pwmValue);
 }
 
 void debug(void) {
-  Serial.print(FlowMeter.rawFlow);
-  Serial.print('\t');
+  // Serial.print(ctrlRaw);
+  // Serial.print(F(";"));
+  // Serial.println(FlowMeter.rawFlow);
+
   Serial.print(flowRef);
+  Serial.print('\t');
+  Serial.print(FlowMeter.rawFlow);
   Serial.print('\t');
   Serial.print(kp);
   Serial.print('\t');
   Serial.print(ki);
+  Serial.print('\t');
+  Serial.print(kd);
   Serial.print('\n');
+}
+
+void flow_control(float desiredFlow, float feedback) {
+  float sampleTime = (millis() - prevIterationTime) * 0.001;
+
+  /*error*/
+  float error = desiredFlow - feedback;
+
+  /*proportional*/
+  pTerm = kp * error;
+
+  /*integration*/
+  if (ki != 0) {
+    iTerm = iTerm + (ki * ((error+prevError)/2) * sampleTime);
+  } else {
+    iTerm = 0;
+  }
+
+  /*derivative*/
+  if (kd != 0) {
+    dTerm = kd * (error - prevError) / sampleTime;
+  } else {
+    dTerm = 0;
+  }
+
+  ctrlRaw = pTerm + iTerm + dTerm + desiredFlow;
+
+  if (ctrlRaw > 255) ctrlRaw = 255;
+  if (ctrlRaw < 0) ctrlRaw = 0;
+
+  prevError = error;
+  prevIterationTime = millis();
+}
+
+void update_flow_ref(void) {
+
+  if (!flag && millis() - prevMillis >= 5000) {
+    flowRef = 50;
+    flag = 1;
+    prevMillis = millis();
+  } else if (flag && millis() - prevMillis >= 5000) {
+    flowRef = 100;
+    flag = 0;
+    prevMillis = millis();
+  }
 }

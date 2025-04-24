@@ -121,7 +121,9 @@ uint8_t SFMReadSensor(float *F) {
           uint8_t crc = SFMCalcCRC((uint8_t *)data.buffer, 2);
           if (crc == data.crc) {
             int32_t flowParsed = SwapBytes(data.rawFlow);
-            *F = (flowParsed - (float)FlowMeter.settings.offset) / (float)FlowMeter.settings.scaleFactor;
+            float raw = (flowParsed - (float)FlowMeter.settings.offset) / (float)FlowMeter.settings.scaleFactor;
+            
+            if (raw > -1.0) *F = raw;
           }
         }
       } else {

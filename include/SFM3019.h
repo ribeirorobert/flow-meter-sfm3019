@@ -15,7 +15,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#define DEBUG_SFM                1
+#define DEBUG_SFM                0
 #define SFM_I2C_ADDRESS          0x2E
 
 #define SFM_CONT_READ_AIR        0x3608
