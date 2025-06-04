@@ -2,45 +2,39 @@
 #include "SFM3019.h"
 #include "Pid.h"
 
+#define BLOWER_CONTROL_PIN    7
 
-#define BLOWER_CONTROL_PIN  7
-uint8_t blowerSpeed = 0;
-uint8_t pwmValue = 0;
-
-float ctrlRaw = 0;
-float flowRef = 0;
-float pTerm = 0, iTerm = 0, dTerm = 0;
-//float kp = 2.0, ki = 7.8, kd = 0.0;
-float kp = 3.8918, ki = 16.0769, kd = 0.2355;
-float prevError = 0;
-unsigned long timer1, timer2;
 
 float tidalVolume = 0;
-unsigned long previousMillis;
-uint32_t prevIterationTime;
+uint32_t previousMillis;
 
-unsigned long prevMillis;
+
+float ctrlRaw = 0, flowRef = 20, prevError = 0;
+float pTerm = 0, iTerm = 0, dTerm = 0;
+uint32_t timer, prevIterationTime;
+float kp = 2.0, ki = 7.8, kd = 0.0;
+//float kp = 3.8918, ki = 16.0769, kd = 0.2355;
+
+uint32_t refTimer;
 uint8_t flag = 0;
-uint8_t enable = 0;
 
 void read_cmds(void);
 void read_flow_sensor(void);
 void blower_set_speed(uint8_t);
+void update_flow_ref(void);
 void debug(void);
 void flow_control(float, float);
-void update_flow_ref(void);
 
 PidController_t flowCtrl;
 
 void setup() {
   Serial.begin(38400);
   Wire.begin();
-  delay(1000);
 
   SFMInit();
 
   pinMode(BLOWER_CONTROL_PIN, OUTPUT);
-  analogWrite(BLOWER_CONTROL_PIN, 0);
+  blower_set_speed(0);
 
   PidControllerInit(&flowCtrl);
   PidControllerSetGains(&flowCtrl, kp, ki, 0.0, 0.0, 0.8, 0.001);
@@ -50,14 +44,14 @@ void setup() {
 
 void loop() {
 
-  if (millis() - timer2 >= 10) {
-    timer2 = millis();
+  if (millis() - timer >= 10) {
+    timer = millis();
 
     read_cmds();
     read_flow_sensor();
-    update_flow_ref();
+    //update_flow_ref();
 
-    ctrlRaw = PidControllerUpdate(&flowCtrl, flowRef, FlowMeter.rawFlow);
+    //ctrlRaw = PidControllerUpdate(&flowCtrl, flowRef, FlowMeter.rawFlow);
     //flow_control(flowRef, FlowMeter.rawFlow);
     blower_set_speed((uint8_t)ctrlRaw);
     debug();
@@ -69,53 +63,23 @@ void read_cmds(void) {
   if (Serial.available() > 0) {
     char c = (char)Serial.read();
 
-    if (c == '0') ctrlRaw = 0;
-    if (c == '1') ctrlRaw = 255;
+    if (c == '1') flowRef += 5;
+    if (c == '2') flowRef -= 5;
 
-    if (c == 'q') {
-      kp = 0.0;
-      PidControllerSetKp(&flowCtrl, kp);
-    }
+    if (c == '3') ctrlRaw += 10;
+    if (c == '4') ctrlRaw -= 10;
 
-    if (c == 'w') {
-      kp += 0.1;
-      PidControllerSetKp(&flowCtrl, kp);
-    }
 
-    if (c == 'e') {
-      kp -= 0.1;
-      PidControllerSetKp(&flowCtrl, kp);
-    }
+    if (c == 'q') kp += 0.1;
+    if (c == 'w') kp -= 0.1;
+    if (c == 'a') ki += 0.05;
+    if (c == 's') ki -= 0.05;
+    if (c == 'z') kd += 0.05;
+    if (c == 'x') kd -= 0.05;
 
-    if (c == 'a') {
-      ki = 0.0;
-      PidControllerSetKi(&flowCtrl, ki);
-    }
-
-    if (c == 's') {
-      ki += 0.05;
-      PidControllerSetKi(&flowCtrl, ki);
-    }
-
-    if (c == 'd') {
-      ki -= 0.05;
-      PidControllerSetKi(&flowCtrl, ki);
-    }
-
-    if (c == 'z') {
-      kd = 0.0;
-      PidControllerSetKd(&flowCtrl, kd);
-    }
-
-    if (c == 'x') {
-      kd += 0.05;
-      PidControllerSetKd(&flowCtrl, kd);
-    }
-
-    if (c == 'c') {
-      kd -= 0.05;
-      PidControllerSetKd(&flowCtrl, kd);
-    }
+    PidControllerSetKp(&flowCtrl, kp);
+    PidControllerSetKi(&flowCtrl, ki);
+    PidControllerSetKd(&flowCtrl, kd);
   }
 }
 
@@ -143,15 +107,17 @@ void debug(void) {
   // Serial.print(F(";"));
   // Serial.println(FlowMeter.rawFlow);
 
-  Serial.print(flowRef);
-  Serial.print('\t');
+  // Serial.print(flowRef);
+  // Serial.print('\t');
   Serial.print(FlowMeter.rawFlow);
-  Serial.print('\t');
-  Serial.print(kp);
-  Serial.print('\t');
-  Serial.print(ki);
-  Serial.print('\t');
-  Serial.print(kd);
+  // Serial.print('\t');
+  // Serial.print(kp);
+  // Serial.print('\t');
+  // Serial.print(ki);
+  // Serial.print('\t');
+  // Serial.print(kd);
+  // Serial.print('\t');
+  // Serial.print(ctrlRaw);
   Serial.print('\n');
 }
 
@@ -189,13 +155,13 @@ void flow_control(float desiredFlow, float feedback) {
 
 void update_flow_ref(void) {
 
-  if (!flag && millis() - prevMillis >= 5000) {
-    flowRef = 50;
+  if (!flag && millis() - refTimer >= 5000) {
+    flowRef = 30;
     flag = 1;
-    prevMillis = millis();
-  } else if (flag && millis() - prevMillis >= 5000) {
-    flowRef = 100;
+    refTimer = millis();
+  } else if (flag && millis() - refTimer >= 5000) {
+    flowRef = 50;
     flag = 0;
-    prevMillis = millis();
+    refTimer = millis();
   }
 }
