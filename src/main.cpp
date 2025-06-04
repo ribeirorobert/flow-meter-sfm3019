@@ -4,7 +4,6 @@
 
 #define BLOWER_CONTROL_PIN    7
 
-
 float tidalVolume = 0;
 uint32_t previousMillis;
 
@@ -37,8 +36,8 @@ void setup() {
   blower_set_speed(0);
 
   PidControllerInit(&flowCtrl);
-  PidControllerSetGains(&flowCtrl, kp, ki, 0.0, 0.0, 0.8, 0.001);
-  PidControllerSetLimits(&flowCtrl, 150, -150, 150, -150, 255, 0);
+  PidControllerSetGains(&flowCtrl, kp, ki, kd, 0.0, 0.8, 0.001);
+  PidControllerSetLimits(&flowCtrl, 150, -150, 250, -250, 255, 0);
   PidControllerSetFFD(&flowCtrl, 80);
 }
 
@@ -56,6 +55,20 @@ void loop() {
     blower_set_speed((uint8_t)ctrlRaw);
     debug();
   }  
+}
+
+
+float limit_rate(float current, float target, float percent) {
+  float delta = target - current;
+  float maxDelta = percent * fabs(current); // usa valor absoluto
+
+  if (delta > maxDelta) {
+    return current + maxDelta;
+  } else if (delta < -maxDelta) {
+    return current - maxDelta;
+  } else {
+    return target;
+  }
 }
 
 void read_cmds(void) {
@@ -119,6 +132,14 @@ void debug(void) {
   // Serial.print('\t');
   // Serial.print(ctrlRaw);
   Serial.print('\n');
+  // Serial.print(flowCtrl.pTerm);
+  // Serial.print('\t');
+  // Serial.print(flowCtrl.iTerm);
+  // Serial.print('\t');
+  // Serial.print(flowCtrl.dTerm);
+  // Serial.print('\t');
+  // Serial.print(flowCtrl.output);
+  // Serial.print('\n');
 }
 
 void flow_control(float desiredFlow, float feedback) {
@@ -132,7 +153,7 @@ void flow_control(float desiredFlow, float feedback) {
 
   /*integration*/
   if (ki != 0) {
-    iTerm = iTerm + (ki * ((error+prevError)/2) * sampleTime);
+    iTerm = iTerm + (ki * error * sampleTime);
   } else {
     iTerm = 0;
   }
@@ -144,7 +165,7 @@ void flow_control(float desiredFlow, float feedback) {
     dTerm = 0;
   }
 
-  ctrlRaw = pTerm + iTerm + dTerm + desiredFlow;
+  ctrlRaw = pTerm + iTerm + dTerm;// + desiredFlow;
 
   if (ctrlRaw > 255) ctrlRaw = 255;
   if (ctrlRaw < 0) ctrlRaw = 0;
