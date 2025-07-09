@@ -109,24 +109,27 @@ uint8_t SFMReadSettings(METER_SETTINGS *sfm) {
 }
 
 
-uint8_t SFMReadSensor(float *F) {
+uint8_t SFMReadSensor(void) {
   if (millis() - FlowMeter.readPeriod >= READ_PERIOD_MS) {
     FlowMeter.readPeriod = millis();
 
     if (FlowMeter.state == INITIALIZED) {
       FLOW_DATA data = {0};
 
-      if (I2C_Read(SFM_I2C_ADDRESS, data.buffer, 3) == I2C_SUCCESS) {
-        if (data.crc != 0) {
-          uint8_t crc = SFMCalcCRC((uint8_t *)data.buffer, 2);
-          if (crc == data.crc) {
-            int32_t flowParsed = SwapBytes(data.rawFlow);
-            *F = (flowParsed - (float)FlowMeter.settings.offset) / (float)FlowMeter.settings.scaleFactor;
-          }
+      if (I2C_Read(SFM_I2C_ADDRESS, data.buffer, 6) == I2C_SUCCESS) {
+        if (data.crcFlow == SFMCalcCRC((uint8_t *)&data.rawFlow, 2) &&
+            data.crcTemp == SFMCalcCRC((uint8_t *)&data.rawTemp, 2)) {
+
+          int32_t flowParsed = SwapBytes(data.rawFlow);
+          FlowMeter.rawFlow = (flowParsed - (float)FlowMeter.settings.offset) / (float)FlowMeter.settings.scaleFactor;
+
+          uint16_t tempRaw = SwapBytes(data.rawTemp);
+          FlowMeter.rawTemp = (float)(tempRaw / 200.0F);
+        } else {
+          FlowMeter.errorCounter++;
         }
-      } else {
-        FlowMeter.errorCounter ++;
       }
+
     }
   }
 
@@ -135,7 +138,7 @@ uint8_t SFMReadSensor(float *F) {
 
 
 uint8_t SFMDiscardPacket(void) {
-  FLOW_DATA data = {0};
+  RAW_DATA data = {0};
 
   uint8_t ret = I2C_Read(SFM_I2C_ADDRESS, data.buffer, 3);
   if (ret == I2C_SUCCESS && data.crc != 0) {

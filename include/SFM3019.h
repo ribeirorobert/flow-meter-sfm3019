@@ -15,7 +15,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#define DEBUG_SFM                1
+#define DEBUG_SFM                0
 #define SFM_I2C_ADDRESS          0x2E
 
 #define SFM_CONT_READ_AIR        0x3608
@@ -87,17 +87,28 @@ typedef struct {
 
 typedef union {
 	struct {
-		uint16_t rawFlow;
+    uint16_t rawFlow;
+    uint8_t  crcFlow;
+    uint16_t rawTemp;
+    uint8_t  crcTemp;
+	};
+	uint8_t buffer[6];
+} FLOW_DATA;
+
+typedef union {
+	struct {
+		uint16_t data;
 		uint8_t crc;
 	};
-	uint8_t buffer[9];
-} FLOW_DATA;
+	uint8_t buffer[3];
+} RAW_DATA;
 
 typedef struct {
   METER_SETTINGS settings;
   FLOW_DATA data;
 
   float rawFlow;
+  float rawTemp;
   uint8_t state;
   
   uint8_t errorCounter;
@@ -182,7 +193,7 @@ uint8_t SFMReadSettings(METER_SETTINGS *);
  * @param fluxo ponteiro para armazenar o valor do fluxo lido
  * @return status da comunicação com o sensor
 */
-uint8_t SFMReadSensor(float *flow);
+uint8_t SFMReadSensor(void);
 
 
 /**
