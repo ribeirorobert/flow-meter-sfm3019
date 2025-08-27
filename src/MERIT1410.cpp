@@ -32,7 +32,7 @@ void MERIT1410_init(void) {
     delay(20);
   }
 
-  merit.offset = (float)((-0.1) * sum);
+  //merit.offset = (float)((-0.1) * sum);
 }
 
 
