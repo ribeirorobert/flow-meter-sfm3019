@@ -136,6 +136,25 @@ uint8_t SFMReadSensor(float *F) {
 }
 
 
+void SFMUpdateFlow(void) {
+  static uint32_t timer = 0;
+
+  if (SFMReadSensor(&FlowMeter.rawFlow) == INITIALIZED) {
+
+    //FlowMeter.rawFlow = (float)(FlowMeter.rawFlow * FLOW_FACTOR);
+    
+    if (abs(FlowMeter.rawFlow) > 0.5) {
+      FlowMeter.volume += ((FlowMeter.rawFlow / 60.0) * (millis() - timer));
+      timer = millis();
+
+      if (FlowMeter.volume < 0) FlowMeter.volume = 0;
+    } else {
+      FlowMeter.volume = 0;
+    }
+  }
+}
+
+
 uint8_t SFMDiscardPacket(void) {
   FLOW_DATA data = {0};
 

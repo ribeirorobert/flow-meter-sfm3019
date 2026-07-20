@@ -29,11 +29,12 @@
 #define SCALE_FACTOR_FLOW    170U
 #define FLOW_OFFSET          40960
 #define MAX_ALLOWED_ERRORS   10
+#define FLOW_FACTOR          1.2754f
 
 #define RESET_TIMER_MS       10
 #define START_TIMER_MS       40
 #define PACKET_TIMER_MS      1
-#define READ_PERIOD_MS       10
+#define READ_PERIOD_MS       3
 
 enum SFM_STATUS {
   RESET          = 0,
@@ -98,6 +99,7 @@ typedef struct {
   FLOW_DATA data;
 
   float rawFlow;
+  float volume;
   uint8_t state;
   
   uint8_t errorCounter;
@@ -183,6 +185,15 @@ uint8_t SFMReadSettings(METER_SETTINGS *);
  * @return status da comunicação com o sensor
 */
 uint8_t SFMReadSensor(float *flow);
+
+
+/**
+ * @brief Corrige fluxo e calcula o volume
+ * 
+ * @param
+ * @return void
+*/
+void SFMUpdateFlow(void);
 
 
 /**
